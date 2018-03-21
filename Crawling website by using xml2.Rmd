@@ -1,0 +1,112 @@
+---
+title: "Crawling website by using xml2"
+author: "Tim"
+date: "2016/12/5"
+output: html_document
+---
+
+```{R, message = FALSE}
+library(xml2)
+```
+
+先建立一個function，抓到每一個觀察點位的超連結，目的是可以得到每一個調查點的id，學名為二或三個字，進入的網站也不同
+```{R}
+get_href = function(name){
+  
+  # find the number of name 
+  divided = unlist(strsplit(name," "))
+  
+  # different number of name belongs to different url
+  if(length(divided) == 2){
+    url = paste0("http://fishdb.sinica.edu.tw/chi/fishdistri_both.php?gen=",divided[1],"&spe=",divided[2],"&PointType2=Y")
+  }else if(length(divided) == 3){
+    url = paste0("http://fishdb.sinica.edu.tw/chi/fishdistri_both.php?gen=",divided[1],"&spe=",divided[2],"%20",divided[3],"&PointType2=Y")
+  }
+  
+  readed = read_html(url)
+  findhref = xml_find_all(readed, "//form/a")
+  findhref2 = xml_attr(findhref, "href")
+  
+  # check every link that contain observation in the title
+  check_href = function(link){
+    if(!"observation" %in% substr(link, 1, 11)){
+      return(" ")
+    }else{
+      return(link)
+    }
+  }
+  
+  # deal with the link and delete the useless
+  test = sapply(findhref2, check_href)
+  test = test[test!=" "]
+  test = paste0("http://fishdb.sinica.edu.tw/chi/", test)
+  return(test)
+}
+
+```
+
+
+先抓取兩種魚類，學名分別為兩個和三個
+```{R}
+
+name = list("Cyprinus carpio carpio", "Ambassis miops")
+href_list = lapply(name, get_href)
+
+print(paste0("資料數共有",length(unlist(href_list)),"筆"))
+head(unlist(href_list))
+
+```
+
+
+用抓取的url爬取其中各個id，URLencode是很重要的，如果在超連結中出現空白，沒有替換成%20則重要資料會缺失，在這個case中魚類id的table消失了
+```{R}
+
+idlist = c()
+test = unlist(href_list)
+for (i in 1:length(test)) {
+   
+    # url_encode is really important, if there are blanks appear in href, you should replace them to %20, otherwise some important          data may lose
+    url_encode = URLencode(test[i])
+    url2 = read_html(url_encode)
+    findid = xml_find_all(url2, "//tr/td[@align='center']/a")
+    idfile = xml_text(findid)
+    idfile = idfile[idfile != ""]
+    idlist = c(idlist, idfile)
+    if(length(idlist) %% 5 == 0){
+      Sys.sleep(as.integer(runif(1, min = 30, max = 45)))
+    }
+}
+
+print(paste0("資料數共有",length(unlist(idlist)),"筆"))
+```
+
+
+用爬取的id進入每個頁面，取得經緯度及需要資料
+```{r}
+# create empty vector
+fishname = c()
+fish1 = c()
+fish2 = c()
+year = c()
+plan = c()
+
+# loop the idlist to get the info u want
+for (i in 1:length(idlist)) {
+  
+  fishurl = read_html(paste0("http://fishdb.sinica.edu.tw/chi/observation_detail.php?id=",idlist[i]))
+  findall = xml_find_all(fishurl, "//tr/td")
+  findallText = xml_text(findall)
+  fishname = c(fishname, findallText[8])
+  fish1 = c(fish1, findallText[14])
+  fish2 = c(fish2, findallText[18])
+  year = c(year, findallText[44])
+  plan = c(plan, findallText[42])
+  
+}
+
+
+# create data frame
+test = data.frame("Species" = fishname, "緯度" = fish1, "經度" = fish2, "年份" = year, "計畫名稱" = plan)
+print(test)
+```
+
